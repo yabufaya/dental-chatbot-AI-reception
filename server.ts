@@ -31,7 +31,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Default or configured n8n Webhook URL
 let configuredWebhookUrl = process.env.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook/dental-chat';
-const N8N_TIMEOUT_MS = parseInt(process.env.N8N_TIMEOUT_MS || '30000', 10);
+const N8N_TIMEOUT_MS = parseInt(process.env.N8N_TIMEOUT_MS || '90000', 10); // 90 seconds for multi-step AI Agent & subflows
 const SESSION_TTL_MS = 45 * 60 * 1000; // 45 minutes
 
 interface SessionEntry {
@@ -466,20 +466,36 @@ app.post('/api/transcribe', async (req: Request, res: Response) => {
 app.post('/api/chat', async (req: Request, res: Response) => {
   try {
     const { chatInput, question, message, sessionId: incomingSessionId, language, channel, webhookUrl, forceSimulate } = req.body;
-    const query = (chatInput || question || message || '').trim();
+    const rawQuery = (chatInput || question || message || '').trim();
 
-    if (!query) {
+    if (!rawQuery) {
       return res.status(400).json({
         error: 'Missing query text',
         status: 400,
       });
     }
 
+    // Token management safeguard: Clamp query to maximum 400 characters (~80 tokens)
+    const query = rawQuery.substring(0, 400);
+
     const { sessionId, isNew } = resolveServerSession(req, incomingSessionId);
     const targetUrl = (webhookUrl || configuredWebhookUrl || '').trim();
 
-    // If forceSimulate requested or no webhook URL provided
-    if (forceSimulate || !targetUrl) {
+    // If no webhook URL provided
+    if (!targetUrl) {
+      const isAmharic = language ? String(language).toLowerCase().includes('am') : false;
+      const msg = isAmharic
+        ? "የ n8n Webhook URL አልተዘጋጀም። እባክዎ በ Diagnostic Studio ውስጥ የ Webhook URL ያስገቡ ወይም በ 📞 +251 11 555 0123 ይደውሉ።"
+        : "The n8n Webhook URL is not configured. Please set your Webhook URL in the Diagnostic Studio tab, or call our clinic at 📞 +251 11 555 0123.";
+      return res.status(400).json({
+        output: msg,
+        reply: msg,
+        error: "NO_WEBHOOK_URL",
+        source: "backend_error"
+      });
+    }
+
+    if (forceSimulate) {
       const sim = generateSimulatedResponse(query, sessionId, language);
       if (req.body.voiceEnabled !== false) {
         sim.audio = await generateVoiceAudio(sim.reply, language);
@@ -516,27 +532,52 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 
     if (!webhookRes.ok) {
       const errorText = await webhookRes.text();
+      const isAmharic = language ? String(language).toLowerCase().includes('am') : false;
+      const statusMsg = isAmharic
+        ? `ይቅርታ፣ ከአገልጋዩ ጋር የኔትወርክ ችግር አጋጥሟል (HTTP ${webhookRes.status})። እባክዎ በ 📞 +251 11 555 0123 ይደውሉልን።`
+        : `Network notice: Webhook returned HTTP ${webhookRes.status} (${webhookRes.statusText}). Front desk: 📞 +251 11 555 0123.`;
       return res.status(webhookRes.status).json({
-        output: `Webhook returned HTTP ${webhookRes.status} (${webhookRes.statusText}).`,
-        reply: `Webhook returned HTTP ${webhookRes.status}.`,
+        output: statusMsg,
+        reply: statusMsg,
         error: `HTTP_${webhookRes.status}`,
         errorDetails: errorText,
         isTestUrl: targetUrl.includes('/webhook-test/'),
         sessionId,
         hint: targetUrl.includes('/webhook-test/')
-          ? "You are using a Test Webhook URL. It only triggers when 'Listen for test event' is active in n8n. After 1 request, n8n automatically deactivates it. Switch to the Production URL and toggle the workflow to ACTIVE."
-          : "Check if the n8n workflow is toggled to ACTIVE in the top right of n8n, and inspect the Executions tab.",
+          ? (isAmharic
+              ? "የ n8n Test Webhook URL እየተጠቀሙ ነው። በ n8n ውስጥ 'Listen for test event' የሚለውን ጠቅ ያድርጉ፣ ወይም ወደ Production URL ይቀይሩና ACTIVE ያድርጉ።"
+              : "You are using a Test Webhook URL. In n8n, click 'Listen for test event', or switch to the Production Webhook URL and toggle ACTIVE.")
+          : (isAmharic
+              ? "እባክዎ በ n8n ውስጥ የ'ACTIVE' መቀየሪያው በርቶ መሆኑን ያረጋግጡ።"
+              : "Check if the n8n workflow is toggled to ACTIVE in the top right of n8n, and inspect the Executions tab."),
       });
     }
 
     const data = await webhookRes.json();
     const rawOutput = data.output || data.reply || data.response || (typeof data === 'string' ? data : '');
     const hasFormMarker = /\[\[\s*FORM\s*\]\]/i.test(rawOutput);
-    const outputText = rawOutput.replace(/\[\[\s*FORM\s*\]\]/gi, '').trim();
+    const hasManageFormMarker = /\[\[\s*MANAGE_FORM/i.test(rawOutput);
+
+    // Extract [[SLOTS: label|iso, ...]] if present in rawOutput or payload
+    let slots: Array<{ label: string; slot_start?: string }> | null = data.slots || null;
+    const slotsMatch = rawOutput.match(/\[\[\s*SLOTS\s*:\s*([^\]]+)\]\]/i);
+    if (!slots && slotsMatch) {
+      slots = slotsMatch[1].split(',').map((s: string) => {
+        const parts = s.split('|').map((p: string) => p.trim());
+        return { label: parts[0] || '', slot_start: parts[1] || parts[0] || '' };
+      }).filter((x: any) => x.label);
+    }
+
+    const outputText = rawOutput
+      .replace(/\[\[\s*FORM\s*\]\]/gi, '')
+      .replace(/\[\[\s*MANAGE_FORM[^\\]]*\]\]/gi, '')
+      .replace(/\[\[\s*SLOTS[^\\]]*\]\]/gi, '')
+      .trim();
 
     let audioData = data.audio || null;
 
     // Backend TTS: generates audio using Deepgram (English) or Google Gemini Flash TTS (Amharic)
+    // Only synthesize the clean spoken text without technical slot tokens!
     if (!audioData && req.body.voiceEnabled !== false) {
       audioData = await generateVoiceAudio(outputText, language);
     }
@@ -553,12 +594,18 @@ app.post('/api/chat', async (req: Request, res: Response) => {
       showForm = true;
     }
 
+    const showManageForm = hasManageFormMarker || Boolean(data.showManageForm);
+    const manageAction = /reschedule|postpone|ቀይር|አዛውር/i.test(rawOutput) ? 'reschedule' : 'cancel';
+
     res.setHeader('X-Session-Id', sessionId);
     return res.json({
       output: outputText,
       reply: outputText,
       audio: audioData,
       showForm: showForm,
+      showManageForm: showManageForm,
+      manageAction: manageAction,
+      slots: slots,
       sessionId: sessionId,
       source: 'n8n_live',
       error: data.error || null,
@@ -566,14 +613,24 @@ app.post('/api/chat', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     const isTimeout = error.name === 'AbortError' || error.message?.includes('aborted');
+    const isAmharic = req.body?.language ? String(req.body.language).toLowerCase().includes('am') : false;
+    const timeoutMsg = isAmharic
+      ? "ይቅርታ፣ የክሊኒኩ አገልጋይ ምላሽ ለመስጠት ጊዜ ወስዶበታል (Timeout)። n8n የስራ ፍሰቱን አጠናቆ እስኪመልስ አልደረሰም። እባክዎ ጥቂት ቆይተው እንደገና ይሞክሩ ወይም በቀጥታ በ 📞 +251 11 555 0123 ይደውሉ።"
+      : "Sorry, there was a timeout waiting for the n8n workflow to finish. Please try again in a moment or call our front desk directly at 📞 +251 11 555 0123.";
+    const networkMsg = isAmharic
+      ? `ይቅርታ፣ የኔትወርክ መቆራረጥ አጋጥሟል (${error.message})። ከ n8n ጋር መገናኘት አልተቻለም። እባክዎ በ 📞 +251 11 555 0123 ይደውሉልን።`
+      : `Network hiccup: Could not connect to n8n webhook (${error.message}). Please check your connection or call 📞 +251 11 555 0123.`;
+    const message = isTimeout ? timeoutMsg : networkMsg;
     return res.status(502).json({
-      output: isTimeout
-        ? 'The dental assistant timed out waiting for n8n (exceeded timeout).'
-        : `Could not reach n8n webhook at: ${configuredWebhookUrl}. (${error.message})`,
+      output: message,
+      reply: message,
       error: error.message,
+      isTimeout,
       sessionId: req.body.sessionId || 'fallback-session',
       source: 'backend_error',
-      hint: 'If n8n is running on your machine, check if n8n is started, or use the Diagnostic Studio tab to test connectivity.',
+      hint: isAmharic
+        ? "n8n በኮምፒውተርዎ ላይ የሚሰራ ከሆነ፣ መስራቱን ያረጋግጡ ወይም የ Diagnostic Studio ትርን ይጠቀሙ።"
+        : "If n8n is running on your machine, check if n8n is started, or use the Diagnostic Studio tab to test connectivity.",
     });
   }
 });
@@ -643,15 +700,45 @@ function generateSimulatedResponse(query: string, sessionId: string, language?: 
       };
     }
 
-    // Amharic Slots & Available Times (ነገ / ሰዓት / ክፍት / ቀጠሮ / መቼ)
-    if (q.includes('ክፍት') || q.includes('ሰዓት') || (q.includes('ነገ') && !q.match(/\b(2|3|4|5|8|9|10|11|12|1)\b/)) || q.includes('መቼ')) {
+    // Amharic Cancellation & Postponing (ሰርዝ / ቀይር / አዛውር)
+    if (q.includes('ሰርዝ') || q.includes('ቀይር') || q.includes('አዛውር') || q.includes('መሰረዝ') || q.includes('ማስተካከል')) {
+      if (q.includes('request:') || q.includes('ስልክ')) {
+        return {
+          output: "የቀጠሮ ጥያቄዎ በተሳካ ሁኔታ ለክሊኒኩ ደርሷል። መቀበያ ክፍላችን በስልክ ቁጥርዎ ያረጋግጥልዎታል። እናመሰግናለን!",
+          reply: "የቀጠሮ ጥያቄዎ በተሳካ ሁኔታ ለክሊኒኩ ደርሷል። መቀበያ ክፍላችን በስልክ ቁጥርዎ ያረጋግጥልዎታል። እናመሰግናለን!",
+          audio: null,
+          sessionId,
+          source: 'simulated_rag',
+        };
+      }
       return {
-        output: "ለነገ (ከሰኞ እስከ ቅዳሜ ከጠዋቱ 2:00 እስከ 11:00 ሰዓት)፣ የ30 ደቂቃ ክፍት የቀጠሮ ሰዓቶች አሉን፡\n• ጠዋት፡ 3:00 (9:00 AM)፣ 4:00 (10:00 AM)፣ 5:30 (11:30 AM)\n• ከሰዓት፡ 8:00 (2:00 PM)፣ 9:30 (3:30 PM)፣ 10:30 (4:30 PM)\nከእነዚህ ውስጥ የትኛው ሰዓት ይመችዎታል?",
-        reply: "ለነገ (ከሰኞ እስከ ቅዳሜ ከጠዋቱ 2:00 እስከ 11:00 ሰዓት)፣ የ30 ደቂቃ ክፍት የቀጠሮ ሰዓቶች አሉን፡\n• ጠዋት፡ 3:00 (9:00 AM)፣ 4:00 (10:00 AM)፣ 5:30 (11:30 AM)\n• ከሰዓት፡ 8:00 (2:00 PM)፣ 9:30 (3:30 PM)፣ 10:30 (4:30 PM)\nከእነዚህ ውስጥ የትኛው ሰዓት ይመችዎታል?",
+        output: "ቀጠሮዎን ለመሰረዝ ወይም ወደ ሌላ ቀን ለማዘዋወር እባክዎ ከታች ባለው ቅጽ ውስጥ የተመዘገቡበትን ስልክ ቁጥር ያስገቡ፡",
+        reply: "ቀጠሮዎን ለመሰረዝ ወይም ወደ ሌላ ቀን ለማዘዋወር እባክዎ ከታች ባለው ቅጽ ውስጥ የተመዘገቡበትን ስልክ ቁጥር ያስገቡ፡",
         audio: null,
         sessionId,
         source: 'simulated_rag',
-        availableSlots: ['ነገ ጠዋት 3:00 (9:00 AM)', 'ነገ ጠዋት 4:00 (10:00 AM)', 'ነገ ከሰዓት 8:00 (2:00 PM)', 'ነገ ከሰዓት 9:30 (3:30 PM)'],
+        showManageForm: true,
+        manageAction: (q.includes('ቀይር') || q.includes('አዛውር') || q.includes('ማስተካከል')) ? 'reschedule' : 'cancel',
+      };
+    }
+
+    // Amharic Slots & Available Times (ነገ / ሰዓት / ክፍት / ቀጠሮ / መቼ)
+    if (q.includes('ክፍት') || q.includes('ሰዓት') || (q.includes('ነገ') && !q.match(/\b(2|3|4|5|8|9|10|11|12|1)\b/)) || q.includes('መቼ')) {
+      const amharicSlots = [
+        { label: 'ጠዋት 2:30 (8:30 AM)', slot_start: '08:30' },
+        { label: 'ጠዋት 3:30 (9:30 AM)', slot_start: '09:30' },
+        { label: 'ጠዋት 4:00 (10:00 AM)', slot_start: '10:00' },
+        { label: 'ከሰዓት 8:00 (2:00 PM)', slot_start: '14:00' },
+        { label: 'ከሰዓት 8:30 (2:30 PM)', slot_start: '14:30' },
+        { label: 'ከሰዓት 9:30 (3:30 PM)', slot_start: '15:30' },
+      ];
+      return {
+        output: "ለነገ የሚገኙ የ30 ደቂቃ ክፍት ሰዓቶች ከታች ተዘርዝረዋል። የሚመችዎትን ሰዓት ይምረጡ፡",
+        reply: "ለነገ የሚገኙ የ30 ደቂቃ ክፍት ሰዓቶች ከታች ተዘርዝረዋል። የሚመችዎትን ሰዓት ይምረጡ፡",
+        audio: null,
+        sessionId,
+        source: 'simulated_rag',
+        slots: amharicSlots,
         bookingIntent: true,
         showForm: false,
       };
@@ -717,6 +804,28 @@ function generateSimulatedResponse(query: string, sessionId: string, language?: 
     };
   }
 
+  // English Cancellation & Postponing
+  if (q.includes('cancel') || q.includes('postpone') || q.includes('reschedule') || q.includes('change appointment')) {
+    if (q.includes('request:') || q.includes('phone:')) {
+      return {
+        output: "Your appointment request has been received. Our reception team will verify the booking details and confirm via phone. Thank you!",
+        reply: "Your appointment request has been received. Our reception team will verify the booking details and confirm via phone. Thank you!",
+        audio: null,
+        sessionId,
+        source: 'simulated_rag',
+      };
+    }
+    return {
+      output: "Please confirm your details in the form below to cancel or reschedule your booking:",
+      reply: "Please confirm your details in the form below to cancel or reschedule your booking:",
+      audio: null,
+      sessionId,
+      source: 'simulated_rag',
+      showManageForm: true,
+      manageAction: (q.includes('postpone') || q.includes('reschedule') || q.includes('change')) ? 'reschedule' : 'cancel',
+    };
+  }
+
   // Tooth cleaning / scaling
   if (q.includes('clean') || q.includes('scaling') || q.includes('plaque') || q.includes('hygiene')) {
     return {
@@ -747,13 +856,21 @@ function generateSimulatedResponse(query: string, sessionId: string, language?: 
 
   // Slot inquiry (e.g. asking for available times, tomorrow, slots, today)
   if (q.includes('slot') || q.includes('available') || q.includes('free time') || q.includes('what time') || q.includes('when can') || (q.includes('tomorrow') && !q.match(/\b(8|9|10|11|12|1|2|3|4|5)(?::[0-5][0-9])?\s*(?:am|pm)?\b/))) {
+    const englishSlots = [
+      { label: '8:30 AM (2:30 local)', slot_start: '08:30' },
+      { label: '9:30 AM (3:30 local)', slot_start: '09:30' },
+      { label: '10:00 AM (4:00 local)', slot_start: '10:00' },
+      { label: '2:00 PM (8:00 local)', slot_start: '14:00' },
+      { label: '2:30 PM (8:30 local)', slot_start: '14:30' },
+      { label: '3:30 PM (9:30 local)', slot_start: '15:30' },
+    ];
     return {
-      output: "Tomorrow (Monday to Saturday, 8:00 AM to 5:00 PM), we have 30-minute appointment slots available at 9:00 AM (3:00 local), 10:00 AM (4:00 local), 11:30 AM (5:30 local), 2:00 PM (8:00 local), 3:30 PM (9:30 local), and 4:30 PM (10:30 local). Which of these times works best for you?",
-      reply: "Tomorrow (Monday to Saturday, 8:00 AM to 5:00 PM), we have 30-minute appointment slots available at 9:00 AM (3:00 local), 10:00 AM (4:00 local), 11:30 AM (5:30 local), 2:00 PM (8:00 local), 3:30 PM (9:30 local), and 4:30 PM (10:30 local). Which of these times works best for you?",
+      output: "Here are the available 30-minute slots for tomorrow. Please tap the time that suits you best:",
+      reply: "Here are the available 30-minute slots for tomorrow. Please tap the time that suits you best:",
       audio: null,
       sessionId,
       source: 'simulated_rag',
-      availableSlots: ['Tomorrow 9:00 AM', 'Tomorrow 10:00 AM', 'Tomorrow 11:30 AM', 'Tomorrow 2:00 PM', 'Tomorrow 3:30 PM', 'Tomorrow 4:30 PM'],
+      slots: englishSlots,
       bookingIntent: true,
       showForm: false, // NEVER show form before a specific slot is chosen!
     };

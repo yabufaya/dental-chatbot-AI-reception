@@ -122,7 +122,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1850,
+        2330,
         976
       ]
     },
@@ -158,7 +158,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2050,
+        2530,
         870
       ]
     },
@@ -194,7 +194,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [
-        2050,
+        2530,
         1080
       ]
     },
@@ -203,7 +203,7 @@
         "promptType": "define",
         "text": "={{ $json.question }}",
         "options": {
-          "systemMessage": "=You are the friendly front-desk voice assistant for Denttora Dental Clinic in Addis Ababa.\n\nBILINGUAL & AMHARIC CROSS-LINGUAL RULES (CRITICAL)\n- When Patient Language is Amharic (or patient writes in Ge'ez Fidel or Latin transliteration):\n  1. Pinecone records are in English: ALWAYS formulate vector search queries for clinic_knowledge in concise ENGLISH keywords (e.g. 'teeth cleaning cost duration', 'filling price', 'root canal procedure').\n  2. Synthesize your final response to the patient strictly in warm, fluent, polite Amharic (አማርኛ) using proper Ge'ez script.\n  3. Always express hours with Ethiopian local time alongside standard time (e.g. ከጠዋቱ 4:00 ሰዓት ወይም 10:00 AM).\n  4. Follow the 3-stage booking lifecycle in Amharic.\n- When Patient Language is English: follow standard English dialogue.\n\nCONVERSATION RULES\n- Greet and introduce yourself only when the patient's message is itself a greeting. Never greet in reply to a time, a date, a slot choice such as \"the first one\" or \"10 am\", a name, or a phone number.\n- If the patient replies with only a time or a slot choice, they are answering the slots you just offered. Treat it as their chosen slot and continue the booking.\n- If you cannot tell what the patient is answering, ask one short question, for example: \"Which day would you like for that time?\" Do not greet.\n\nCURRENT TIME & CLINIC CONTEXT\n- Now: {{ $now.setZone('Africa/Addis_Ababa').toFormat('cccc, LLLL d, yyyy, h:mm a') }} (Addis Ababa, GMT+3).\n- Working hours: Monday to Saturday from 8:00 AM to 5:00 PM. Closed on Sundays.\n- Patient language: {{ $json.language }}.\n- Format all appointment times clearly for speech: 12-hour AM/PM with Ethiopian local time in brackets, for example: 10:00 AM (4:00 local). Use the exact label provided by the booking tool.\n\nCRITICAL SPEECH-OPTIMIZATION DIRECTIVES (FOR VOICE & TTS)\n- Your output is read aloud by a neural voice engine and displayed as typed chat.\n- NEVER use markdown formatting like asterisks (**bold**), hashtags (# headers), or markdown bullet dashes (- item).\n- Write in clean, natural spoken sentences. Use commas and periods for natural breathing pauses.\n- Keep every message concise and conversational, ideally between 30 and 70 words.\n\nSTRICT OUT-OF-FIELD BOUNDARIES (PREVENT VAIN SEARCHES)\n- Your ONLY area of expertise is dentistry, oral health, and this clinic's appointments, services, hours, and policies.\n- If the patient asks about ANYTHING outside dental clinic care (for example: headache, cold, diabetes, stomach ache, non-dental prescriptions, tech, weather, general chit-chat):\n  1. DO NOT call clinic_knowledge (Pinecone).\n  2. DO NOT call Booking tool.\n  3. Terminate tool execution immediately and reply with a warm, casual deflection:\n     \"I would love to help, but I am strictly the dental assistant here! My knowledge only covers teeth, smiles, and clinic bookings. For other health questions, please consult a general doctor. Is there anything about your teeth or booking an appointment I can assist you with?\"\n\nTOOL USAGE & WHEN TO CALL WHICH\n1. clinic_knowledge (Pinecone vector database):\n   - Call ONLY for genuine factual questions about the clinic: procedure details, prices, doctor specialties, clinic location, payment methods, and policies.\n   - Pinecone records are in English. Always turn the patient's request into a concise English search phrase (e.g., \"teeth cleaning cost and duration\").\n   - Do NOT call for greetings, thank yous, simple acknowledgments, or out-of-field questions.\n2. Booking tool (Booking API sub-workflow):\n   - Call ONLY when an appointment operation is actively requested: get_slots, book, find, reschedule, cancel.\n   - NEVER call Booking tool speculatively or without the required slot/time information.\n\nWHEN THE PATIENT MENTIONS A SERVICE OR DENTAL PROBLEM (e.g. \"I need a tooth cleaning\")\n- NEVER respond with a generic greeting like \"How can I help you?\" because the patient already told you what they want.\n- If they gave NO day or time: call clinic_knowledge with an English search query (e.g. \"teeth cleaning procedure price duration\"), then reply in three spoken parts: (1) a warm acknowledgment, (2) one or two sentences on what the treatment does plus duration and price from clinic_knowledge, (3) the question \"When would you like to come in? Let me know which day or time works best for you.\"\n- If they ALREADY gave a day or time (e.g. \"tomorrow at 2 for cleaning\"): do NOT ask when they want to come in. Give a one-sentence acknowledgment and call Booking tool with action get_slots right away. Mention price only if they ask.\n\nSTRICT 3-STAGE APPOINTMENT BOOKING LIFECYCLE\nDates: today is {{ $now.setZone('Africa/Addis_Ababa').toFormat('yyyy-LL-dd') }} and tomorrow is {{ $now.setZone('Africa/Addis_Ababa').plus({days:1}).toFormat('yyyy-LL-dd') }}. Convert words like \"today\", \"tomorrow\" or \"Friday\" into date_from and date_to as YYYY-MM-DD.\n\nSTAGE 1 - INQUIRING ABOUT AVAILABLE TIMES / SLOTS:\n- When the user asks about available times or free slots for today, tomorrow, or a date (e.g., \"what are the free available times tomorrow?\"):\n  1. Call Booking tool with action \"get_slots\", setting date_from and date_to. Set category (default checkup). If they gave a time preference, pass it in preferred_time. If they said morning or afternoon, use time_of_day.\n  2. The booking tool returns all free 30-minute slots across the day (both on-the-hour and half-hour).\n  3. MANDATORY 30-MINUTE INTERVAL PRESENTATION:\n     - All dental appointment slots run on 30-minute boundaries: 8:00, 8:30, 9:00, 9:30, 10:00, 10:30, 11:00, 11:30, 1:00, 1:30, 2:00, 2:30, 3:00, 3:30, 4:00, 4:30.\n     - NEVER summarize with only round hours like \"9:00 AM, 10:00 AM, 2:00 PM, 4:00 PM\"! You MUST explicitly mention half-hour options (such as 8:30 AM, 9:30 AM, 10:30 AM, 2:30 PM, 3:30 PM) so the patient clearly sees the 30-minute flexibility.\n     - Example response format:\n       \"For tomorrow, Tuesday, we have 30-minute checkup slots available throughout the day. In the morning, you could do 8:30 AM (2:30 local), 9:30 AM (3:30 local), or 10:30 AM (4:30 local). In the afternoon, we have 2:00 PM (8:00 local), 2:30 PM (8:30 local), and 3:30 PM (9:30 local). Which of these 30-minute times works best for you?\"\n  4. CRITICAL RULE FOR STAGE 1: NEVER output [[FORM]] in Stage 1! NEVER ask for the patient's full name or phone number in Stage 1! The patient has not selected a time yet!\n\nSTAGE 2 - CONFIRMING THE PATIENT'S CHOSEN TIME:\n- ONLY when the patient replies with their selected time from the slots you offered (for example: \"10:00 AM\", \"2:30 PM\", \"the first slot\"):\n  1. Acknowledge and confirm that specific time: \"Wonderful, [Time] is reserved for you. Please enter your full name and phone number in the form below to confirm your appointment.\"\n  2. End your message with the exact hidden token: [[FORM]]\n  3. Do NOT ask for the full name or phone number in chat text because the form collects them.\n\nSTAGE 3 - CREATING THE BOOKING:\n- When the patient's message contains their full name and phone number (from the submitted form):\n  1. Call get_slots for that date to match the chosen time, copy slot_start exactly, and call Booking tool with action \"book\".\n  2. Announce the confirmed reference DC-XXXXXX, the date and time, and that their spot is reserved.\n\nERROR & CLINIC CLOSED SAFETY:\n- If the booking tool returns a note that today's hours have ended or that the clinic is closed on that day (e.g. Sunday): explain this clearly to the patient and offer the alternative times provided by the tool.\n- If the booking tool fails or returns an unfixable error: say once that you cannot check appointment times right now and give the clinic phone number +251 11 555 0123.\n- In case of ANY error: NEVER ask for name or phone, NEVER promise a callback, and NEVER output [[FORM]].",
+          "systemMessage": "=You are the friendly front-desk voice assistant for Denttora Dental Clinic in Addis Ababa.\n\nBILINGUAL & AMHARIC CROSS-LINGUAL RULES (CRITICAL)\n- When Patient Language is Amharic (or patient writes in Ge'ez Fidel or Latin transliteration):\n  1. Pinecone records are in English: ALWAYS formulate vector search queries for clinic_knowledge in concise ENGLISH keywords (e.g. 'teeth cleaning cost duration', 'filling price', 'root canal procedure').\n  2. Synthesize your final response to the patient strictly in warm, fluent, polite Amharic (አማርኛ) using proper Ge'ez script.\n  3. Always express hours with Ethiopian local time alongside standard time (e.g. ከጠዋቱ 4:00 ሰዓት ወይም 10:00 AM).\n  4. Follow the booking lifecycle below in Amharic.\n- When Patient Language is English: follow standard English dialogue.\n\nCONVERSATION RULES\n- Greet and introduce yourself only when the patient's message is itself a greeting. Never greet in reply to a time, a date, a slot choice such as \"the first one\" or \"10 am\", a name, or a phone number.\n- If the patient replies with only a time or a slot choice, they are answering the slots you just offered. Treat it as their chosen slot and continue the booking.\n- If you cannot tell what the patient is answering, ask one short question, for example: \"Which day would you like for that time?\" Do not greet.\n\nCURRENT TIME & CLINIC CONTEXT\n- Now: {{ $now.setZone('Africa/Addis_Ababa').toFormat('cccc, LLLL d, yyyy, h:mm a') }} (Addis Ababa, GMT+3).\n- Working hours: Monday to Saturday from 8:00 AM to 5:00 PM. Closed on Sundays.\n- Patient language: {{ $json.language }}.\n- Format all appointment times clearly for speech: 12-hour AM/PM with Ethiopian local time in brackets, for example: 10:00 AM (4:00 local). Use the exact label provided by the booking tool.\n\nMANDATORY TOOL-CALLING ENFORCEMENT (CRITICAL - ZERO HALLUCINATED SLOTS)\n- Whenever the patient asks about available times, open slots, clinic hours on a specific date, or booking for ANY day (including tomorrow, Sunday, next week, or today):\n  YOU ARE STRICTLY FORBIDDEN from answering from memory, assuming open/closed status on your own, or formulating slot times yourself.\n  YOU MUST ALWAYS EXECUTE Booking tool (action: 'get_slots') FIRST with date_from and date_to.\n- The Booking tool subflow connects to the live Google Calendar and authoritatively calculates open hours, closed days (e.g. Sunday), and next available clinic day slots.\n- NEVER invent, extrapolate, or recite any time slot or date without receiving it directly in the Booking tool observation of THIS turn.\n- If you formulate a slot list or date availability without calling Booking tool, your response is strictly invalid and will be blocked by the guardrail.\n\nCRITICAL SPEECH-OPTIMIZATION DIRECTIVES (FOR VOICE & TTS)\n- Your output is read aloud by a neural voice engine and displayed as typed chat.\n- NEVER use markdown formatting like asterisks (**bold**), hashtags (# headers), or markdown bullet dashes (- item).\n- Write in clean, natural spoken sentences. Use commas and periods for natural breathing pauses.\n- Keep every message concise and conversational, ideally between 20 and 50 words.\n\nSTRICT OUT-OF-FIELD BOUNDARIES (PREVENT VAIN SEARCHES)\n- Your ONLY area of expertise is dentistry, oral health, and this clinic's appointments, services, hours, and policies.\n- If the patient asks about ANYTHING outside dental clinic care (for example: headache, cold, diabetes, stomach ache, non-dental prescriptions, tech, weather, general chit-chat):\n  1. DO NOT call clinic_knowledge (Pinecone).\n  2. DO NOT call Booking tool.\n  3. Terminate tool execution immediately and reply with a warm, casual deflection:\n     \"I would love to help, but I am strictly the dental assistant here! My knowledge only covers teeth, smiles, and clinic bookings. For other health questions, please consult a general doctor. Is there anything about your teeth or booking an appointment I can assist you with?\"\n\nTOOL USAGE & WHEN TO CALL WHICH\n1. clinic_knowledge (Pinecone vector database):\n   - Call ONLY for genuine factual questions about the clinic: procedure details, prices, doctor specialties, clinic location, payment methods, and policies.\n   - Pinecone records are in English. Always turn the patient's request into a concise English search phrase (e.g., \"teeth cleaning cost and duration\").\n   - Do NOT call for greetings, thank yous, simple acknowledgments, or out-of-field questions.\n2. Booking tool (Booking API sub-workflow):\n   - Call whenever checking appointment availability, open slots, finding, moving, or canceling appointments.\n   - YOU MUST call Booking tool (action: get_slots) whenever the patient inquires about open times for any day. Do NOT answer without this tool call!\n   - NEVER use action book: the system books automatically after the patient submits the form.\n\nWHEN THE PATIENT MENTIONS A SERVICE OR DENTAL PROBLEM (e.g. \"I need a tooth cleaning\")\n- NEVER respond with a generic greeting like \"How can I help you?\" because the patient already told you what they want.\n- If they gave NO day or time: call clinic_knowledge with an English search query (e.g. \"teeth cleaning procedure price duration\"), then reply in three spoken parts: (1) a warm acknowledgment, (2) one or two sentences on what the treatment does plus duration and price from clinic_knowledge, (3) the question \"When would you like to come in? Let me know which day or time works best for you.\"\n- If they ALREADY gave a day or time: do NOT ask when they want to come in. Follow BOOKING RULE B right away.\n\nBOOKING LIFECYCLE (YOU CHECK THE CALENDAR, THE SYSTEM CREATES THE BOOKING)\nYou never create a new booking yourself. You only check the calendar with Booking tool action get_slots. After the patient submits the form, the system books automatically and sends the confirmation, so you NEVER write a booking confirmation or a reference number for a new booking, and you NEVER say a time is reserved or booked.\nDates: today is {{ $now.setZone('Africa/Addis_Ababa').toFormat('yyyy-LL-dd') }} and tomorrow is {{ $now.setZone('Africa/Addis_Ababa').plus({days:1}).toFormat('yyyy-LL-dd') }}. Convert words like \"today\", \"tomorrow\" or \"Friday\" into date_from and date_to as YYYY-MM-DD.\n\nRULE A - the patient asks about available times, open slots, or gives no time yet (e.g. \"what times are free tomorrow?\"):\n  1. Call Booking tool get_slots with date_from, date_to (e.g., tomorrow's date) and category (default checkup). You MUST execute this tool call.\n  2. Inspect the tool's JSON output:\n     - If the tool returned a note (such as the clinic being closed on Sundays and giving the next open day): speak that note in ONE short spoken sentence.\n     - Otherwise, speak ONE short spoken sentence: \"Here are the available 30-minute slots for [day]. Please tap the time that suits you best:\" (or in Amharic: \"ለ[ቀን] የሚገኙ የ30 ደቂቃ ክፍት ሰዓቶች ከታች ተዘርዝረዋል። የሚመችዎትን ሰዓት ይምረጡ፡\").\n  3. DO NOT recite all slots in voice. On a new line, output the slot buttons token: [[SLOTS: <slot1_label>|<slot1_start>, <slot2_label>|<slot2_start>, ...]] using ONLY the slots provided in the tool result. The frontend will render them as interactive buttons. In rule A never output [[FORM]] and never ask for name or phone.\n\nRULE B - the patient gave a day AND a time (e.g. \"Monday 9 am for checkup\"):\n  1. Do NOT list the whole day. Call get_slots with date_from and date_to set to that date, category, and preferred_time set to that time.\n  2. If that exact time is in the returned slots, it is free: go straight to RULE C.\n  3. If it is not in the list, say that exact time is not available and offer the 3 nearest returned times.\n  4. If the tool note says the clinic is closed that day (for example Sunday), say so and offer the times the tool returned for the next open day.\n\nRULE C - confirming a free time (the patient picked it from your list, or rule B showed it free):\n  1. Before asking for details, you MUST have called get_slots in THIS turn for that date, and the chosen time must be in the result. If the patient just picked a time from your earlier list, call get_slots again for that date to verify it.\n  2. Reply: \"Good news, [weekday, full date, time with local time] is available. Please enter your full name and phone number in the form below to confirm your booking.\" Never use the words today or tomorrow, always say the weekday and date.\n  3. End your message with two hidden tokens on a new line, exactly in this shape: [[FORM]] [[SLOT:<slot_start copied exactly from the get_slots result>|<category>|<the patient's reason in a few words, or empty>]]\n  4. Do NOT ask for the name or phone in chat text because the form collects them.\n\nRULE D - if the patient types a name and phone number but you have no chosen time yet, ask which day and time they want and check it with get_slots. Do not confirm anything.\n\nRULE E - CANCELLATION OR RESCHEDULING (POSTPONE):\n  1. When the patient asks to cancel, postpone, or change an existing booking: DO NOT ask for phone or reference in chat.\n  2. Reply in one short polite sentence: \"Please confirm your details in the form below to cancel or reschedule your booking.\" (or in Amharic: \"ቀጠሮዎን ለመሰረዝ ወይም ለማዘዋወር እባክዎ ከታች ባለው ቅጽ ውስጥ ስልክ ቁጥርዎን ያስገቡ፡\").\n  3. End your message on a new line with: [[MANAGE_FORM]].\n\nERROR & CLINIC CLOSED SAFETY:\n- If the booking tool returns a note that today's hours have ended or that the clinic is closed on that day (e.g. Sunday): explain this clearly to the patient and offer the alternative times provided by the tool.\n- If the booking tool fails or returns an unfixable error: say once that you cannot check appointment times right now and give the clinic phone number +251 11 555 0123.\n- In case of ANY error: NEVER ask for name or phone, NEVER promise a callback, and NEVER output [[FORM]].",
           "maxIterations": 10,
           "returnIntermediateSteps": true
         }
@@ -213,7 +213,7 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 1.7,
       "position": [
-        2160,
+        2640,
         928
       ],
       "retryOnFail": true,
@@ -224,7 +224,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { output: ($json.output || '').replace(/\\[\\[\\s*FORM\\s*\\]\\]/gi, '').trim(), reply: ($json.output || '').replace(/\\[\\[\\s*FORM\\s*\\]\\]/gi, '').trim(), showForm: Boolean($json.output && /\\[\\[\\s*FORM\\s*\\]\\]/i.test($json.output)), sessionId: $('Code in JavaScript').first().json.sessionId, error: null } }}",
+        "responseBody": "={{ (() => {\n  const raw = $json.output || '';\n  const hasForm = Boolean(/\\[\\[\\s*FORM\\s*\\]\\]/i.test(raw));\n  const hasManageForm = Boolean(/\\[\\[\\s*MANAGE_FORM/i.test(raw));\n  const slotsMatch = raw.match(/\\[\\[\\s*SLOTS\\s*:\\s*([^\\]]+)\\]\\]/i);\n  let slots = null;\n  if (slotsMatch) {\n    slots = slotsMatch[1].split(',').map(s => {\n      const parts = s.split('|').map(p => p.trim());\n      return { label: parts[0] || '', slot_start: parts[1] || parts[0] || '' };\n    }).filter(x => x.label);\n  }\n  const clean = raw\n    .replace(/\\[\\[\\s*FORM\\s*\\]\\]/gi, '')\n    .replace(/\\[\\[\\s*MANAGE_FORM[^\\]]*\\]\\]/gi, '')\n    .replace(/\\[\\[\\s*SLOTS[^\\]]*\\]\\]/gi, '')\n    .trim();\n  return {\n    output: clean,\n    reply: clean,\n    showForm: hasForm,\n    showManageForm: hasManageForm,\n    manageAction: /reschedule|postpone|ቀይር|አዛውር/i.test(raw) ? 'reschedule' : 'cancel',\n    slots: slots,\n    sessionId: $('Code in JavaScript').first().json.sessionId,\n    pendingSlot: $json.pendingSlot || null,\n    error: null\n  };\n})() }}",
         "options": {}
       },
       "id": "ccb7f401-5448-4845-ba42-ff358d1727ba",
@@ -253,7 +253,7 @@
         }
       },
       "id": "81b2e545-d3ac-472f-8e3a-6a0f7cbe8242",
-      "name": "Pinecone (retrieve \u2192 tool)",
+      "name": "Pinecone (retrieve → tool)",
       "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
       "typeVersion": 1,
       "position": [
@@ -306,7 +306,7 @@
             {
               "id": "f1",
               "name": "output",
-              "value": "\u12ed\u1245\u122d\u1273 \u2014 \u12a0\u1201\u1295 \u1275\u1295\u123d \u12e8\u1294\u1275\u12c8\u122d\u12ad \u1218\u124b\u1228\u1325 \u12a0\u130b\u1325\u121e\u1293\u120d\u1362 \u12a5\u1263\u12ad\u12ce \u12f0\u130d\u1218\u12cd \u12ed\u121e\u12ad\u1229 \u12c8\u12ed\u121d \u1260 +251 11 555 0123 \u12ed\u12f0\u12cd\u1209\u120d\u1295\u1362 (Sorry, connection hiccup \u2014 please call +251 11 555 0123)",
+              "value": "ይቅርታ — አሁን ትንሽ የኔትወርክ መቋረጥ አጋጥሞናል። እባክዎ ደግመው ይሞክሩ ወይም በ +251 11 555 0123 ይደውሉልን። (Sorry, connection hiccup — please call +251 11 555 0123)",
               "type": "string"
             },
             {
@@ -331,7 +331,7 @@
     },
     {
       "parameters": {
-        "description": "Use ONLY when the patient wants to book, move or cancel an appointment, or asks about available slots. Returns available 30-minute appointment slots (each slot is 30 minutes, e.g. 8:00 AM, 8:30 AM, 9:00 AM, 9:30 AM, 10:00 AM, 10:30 AM, 2:00 PM, 2:30 PM, etc.). Always set action. get_slots needs category and date_from/date_to. book needs slot_start (copied from get_slots), category, name, and phone. find needs phone. reschedule needs phone and new_slot_start. cancel needs phone.",
+        "description": "Use ONLY to check appointment availability or to find, move or cancel an existing appointment. Returns available 30-minute slots (8:00 AM, 8:30 AM, ... 4:30 PM). Always set action. NEVER use action book: new bookings are created automatically by the system after the patient submits the form. get_slots needs category and date_from/date_to (add preferred_time when the patient asked for an exact time). find needs phone. reschedule needs phone and new_slot_start. cancel needs phone.",
         "workflowId": {
           "__rl": true,
           "value": "2Vvc0zyWhUsKaaBV",
@@ -341,7 +341,7 @@
         "workflowInputs": {
           "mappingMode": "defineBelow",
           "value": {
-            "action": "={{ $fromAI('action', 'One of: get_slots, book, find, reschedule, cancel', 'string') }}",
+            "action": "={{ $fromAI('action', 'One of: get_slots, find, reschedule, cancel. Never book', 'string') }}",
             "category": "={{ $fromAI('category', 'Visit type: checkup, pain, filling, extraction, root_canal, whitening, braces or other. Used by get_slots and book', 'string') }}",
             "urgency": "={{ $fromAI('urgency', 'normal or priority (priority for non-severe tooth pain). Used by get_slots', 'string') }}",
             "reason_text": "={{ $fromAI('reason_text', 'The patients own words about the problem. Used by book. Empty if none', 'string') }}",
@@ -355,7 +355,7 @@
             "name": "={{ $fromAI('name', 'Patient full name. Used by book', 'string') }}",
             "phone": "={{ $fromAI('phone', 'Patient phone number as the patient typed it. Used by book, find, reschedule, cancel', 'string') }}",
             "email": "={{ $fromAI('email', 'Patient email. Used by book. Empty if none', 'string') }}",
-            "reference": "={{ $fromAI('reference', 'Booking reference like DC-482913. Used by reschedule and cancel. Empty if unknown', 'string') }}",
+            "reference": "={{ $fromAI('reference', 'Booking reference exactly as returned by the booking system. Used by reschedule and cancel. Empty if unknown', 'string') }}",
             "source": "web"
           },
           "matchingColumns": [],
@@ -567,6 +567,303 @@
           "name": "Google Gemini(PaLM) Api account 2"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detects the form submission and loads the slot the patient chose.\nconst base = $input.first().json;\nconst wh = $('Webhook').first().json;\nconst body = wh.body ?? wh;\nconst sid = String(base.sessionId || '');\nconst text = String(base.question || '').trim();\n\nconst store = $getWorkflowStaticData('global');\nstore.pending = store.pending || {};\nconst nowMs = Date.now();\nfor (const k of Object.keys(store.pending)) {\n  if (nowMs - (store.pending[k].t || 0) > 2 * 3600 * 1000) delete store.pending[k];\n}\n\n// pending slot: echoed by the frontend if available, otherwise remembered per session\nconst bp = body.pendingSlot;\nconst pending = (bp && bp.slot_start)\n  ? { slot_start: String(bp.slot_start), category: String(bp.category || 'checkup'), reason: String(bp.reason || '') }\n  : (store.pending[sid] || null);\n\n// form fields: structured payload first, typed message as fallback\nconst f = (body.form && typeof body.form === 'object') ? body.form : body;\nconst pick = (...ks) => { for (const k of ks) { if (f[k] !== undefined && f[k] !== null && String(f[k]).trim() !== '') return String(f[k]).trim(); } return ''; };\nlet name = pick('name', 'fullName', 'full_name');\nif (!name) name = [pick('firstName', 'first_name'), pick('lastName', 'last_name')].filter(Boolean).join(' ');\nlet phone = pick('phone', 'phoneNumber', 'phone_number');\nlet email = pick('email');\nconst explicit = !!(name || phone || body.type === 'form' || body.formSubmitted);\n\nif (!phone) { const pm = text.match(/(?:\\+?251|0)?[\\s-]?[79](?:[\\s-]?\\d){8}/); if (pm) phone = pm[0].trim(); }\nif (!email) { const em = text.match(/[^\\s@,]+@[^\\s@,]+\\.[^\\s@,]{2,}/); if (em) email = em[0]; }\nif (!name && phone) {\n  let rest = text.replace(phone, ' ');\n  if (email) rest = rest.replace(email, ' ');\n  name = rest.replace(/\\b(my name is|full name|name|phone number|phone|mobile|email|and|is)\\b/gi, ' ')\n    .replace(/[0-9+@,:;()_.\\-]/g, ' ').replace(/\\s+/g, ' ').trim();\n}\nif (!/\\p{L}{2,}/u.test(name)) name = '';\n\nconst isForm = !!(explicit || (pending && phone));\nlet formProblem = '';\nif (isForm && !pending) formProblem = 'no_slot';\nelse if (isForm && !name) formProblem = 'missing_name';\nelse if (isForm && !phone) formProblem = 'missing_phone';\nconst canBook = !!(isForm && pending && name && phone);\n\nreturn [{ json: { ...base, isForm, canBook, formProblem, pending, name, phone, email } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1850,
+        976
+      ],
+      "id": "51425ff2-0263-4957-9306-8883ee71cea5",
+      "name": "Detect Form"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f1a",
+              "leftValue": "={{ Boolean($json.isForm) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2050,
+        976
+      ],
+      "id": "7438e7f6-ed53-48df-9ae7-30e54b35f1e7",
+      "name": "Form submitted?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f2a",
+              "leftValue": "={{ Boolean($json.canBook) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2290,
+        700
+      ],
+      "id": "0e5676e9-443b-405c-a834-2b62eb04e28c",
+      "name": "Ready to book?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "2Vvc0zyWhUsKaaBV",
+          "mode": "id",
+          "cachedResultName": "Dental Clinic - Booking API"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action": "book",
+            "category": "={{ $json.pending.category || 'checkup' }}",
+            "urgency": "normal",
+            "reason_text": "={{ $json.pending.reason || '' }}",
+            "date_from": "",
+            "date_to": "",
+            "time_of_day": "",
+            "preferred_time": "",
+            "time_system": "",
+            "slot_start": "={{ $json.pending.slot_start }}",
+            "new_slot_start": "",
+            "name": "={{ $json.name }}",
+            "phone": "={{ $json.phone }}",
+            "email": "={{ $json.email || '' }}",
+            "reference": "",
+            "source": "form"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "action",
+              "displayName": "action",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "urgency",
+              "displayName": "urgency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "reason_text",
+              "displayName": "reason_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "date_from",
+              "displayName": "date_from",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "date_to",
+              "displayName": "date_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "time_of_day",
+              "displayName": "time_of_day",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "preferred_time",
+              "displayName": "preferred_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "time_system",
+              "displayName": "time_system",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "slot_start",
+              "displayName": "slot_start",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "new_slot_start",
+              "displayName": "new_slot_start",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "reference",
+              "displayName": "reference",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2530,
+        640
+      ],
+      "id": "0d477898-6d20-4abc-a650-223bafe71dff",
+      "name": "Book appointment",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds the patient reply from the REAL booking result. No AI involved.\nconst D = $('Detect Form').first().json;\nconst R = D.canBook ? ($json || {}) : {};\nconst am = D.language === 'Amharic';\nconst PHONE = '+251 11 555 0123';\nconst sid = String(D.sessionId || '');\nconst store = $getWorkflowStaticData('global');\nstore.pending = store.pending || {};\n\nconst T = am ? {\n  ok: (l, r, m) => 'ቀጠሮዎ ተረጋግጧል። ' + l + '። የቀጠሮ ቁጥርዎ ' + r + ' ነው።' + (m ? ' የማረጋገጫ ኢሜይል ወደ እርስዎ ይላካል።' : '') + ' በዴንቶራ የጥርስ ክሊኒክ በደስታ እንጠብቅዎታለን።',\n  taken: 'ይቅርታ፣ ይህ ሰዓት ሊያዝ አይችልም። እባክዎ ሌላ ቀን ወይም ሰዓት ይንገሩኝ፣ እኔም አረጋግጣለሁ።',\n  noSlot: 'እባክዎ መጀመሪያ የሚፈልጉትን ቀንና ሰዓት ይንገሩኝ፣ እኔም አረጋግጣለሁ።',\n  name: 'እባክዎ ሙሉ ስምዎን በቅጹ ውስጥ ያስገቡ።',\n  phone: 'የስልክ ቁጥሩ ትክክል አይመስልም። እባክዎ በቅጹ ውስጥ በትክክል ያስገቡ፣ ለምሳሌ 0912345678።',\n  email: 'የኢሜይል አድራሻው ትክክል አይመስልም። እባክዎ በቅጹ ውስጥ እንደገና ያስገቡ።',\n  fail: 'ይቅርታ፣ ቀጠሮውን አሁን ማስያዝ አልቻልኩም። እባክዎ በ ' + PHONE + ' ይደውሉልን።',\n} : {\n  ok: (l, r, m) => 'Your appointment is confirmed. ' + l + '. Your booking reference is ' + r + '.' + (m ? ' A confirmation email is on its way.' : '') + ' We look forward to seeing you at Denttora Dental Clinic.',\n  taken: 'Sorry, that time cannot be booked. Please tell me another day or time and I will check it for you.',\n  noSlot: 'Please tell me which day and time you would like first, and I will check it in the calendar.',\n  name: 'Please enter your full name in the form below.',\n  phone: 'That phone number does not look valid. Please enter it again in the form below, for example 0912345678.',\n  email: 'That email does not look valid. Please enter it again in the form below.',\n  fail: 'Sorry, I could not complete the booking just now. Please try again or call us on ' + PHONE + '.',\n};\n\nlet out = '';\nlet keep = false;\nif (D.formProblem === 'no_slot') out = T.noSlot;\nelse if (D.formProblem === 'missing_name') { out = T.name + ' [[FORM]]'; keep = true; }\nelse if (D.formProblem === 'missing_phone') { out = T.phone + ' [[FORM]]'; keep = true; }\nelse if (R.ok === true && R.action === 'book' && R.reference) {\n  out = T.ok(R.label, R.reference, R.email_will_be_sent);\n  delete store.pending[sid];\n} else {\n  const e = typeof R.error === 'string' ? R.error : '';\n  if (e === 'invalid_phone') { out = T.phone + ' [[FORM]]'; keep = true; }\n  else if (e === 'missing_name') { out = T.name + ' [[FORM]]'; keep = true; }\n  else if (e === 'invalid_email' || e === 'email_typo') { out = T.email + ' [[FORM]]'; keep = true; }\n  else if (['slot_taken', 'too_soon', 'closed_day', 'outside_hours', 'invalid_slot', 'too_far'].includes(e)) { out = T.taken; delete store.pending[sid]; }\n  else { out = T.fail; delete store.pending[sid]; }\n}\nreturn [{ json: { output: out, pendingSlot: keep ? D.pending : null } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2770,
+        700
+      ],
+      "id": "45171e16-335e-4f2c-8e9c-6df17cdff7fe",
+      "name": "Compose booking reply"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs after the AI agent. The AI can never show a fake reference, unverified slots, or an unverified booking form.\nconst D = $('Detect Form').first().json;\nconst sid = String(D.sessionId || '');\nconst am = D.language === 'Amharic';\nconst PHONE = '+251 11 555 0123';\nconst store = $getWorkflowStaticData('global');\nstore.pending = store.pending || {};\n\nlet out = String($json.output || '').trim();\nconst steps = $json.intermediateSteps || [];\nconst obs = steps\n  .map((s) => (typeof s.observation === 'string' ? s.observation : JSON.stringify(s.observation || '')))\n  .join(' ');\n\n// Check whether Booking tool was actually invoked in this turn\nconst hasBookingToolObs = /get_slots|total_free|duration_min|slot_start/i.test(obs);\n\n// 1) A booking reference must come from a real tool result\nconst refs = out.match(/DC-\\d{6}/g) || [];\nif (refs.some((r) => !obs.includes(r))) {\n  out = am\n    ? 'ይቅርታ፣ አሁን ማጠናቀቅ አልቻልኩም። እባክዎ እንደገና ይሞክሩ ወይም በ ' + PHONE + ' ይደውሉልን።'\n    : 'Sorry, I could not complete that just now. Please try again or call us on ' + PHONE + '.';\n  return [{ json: { output: out, pendingSlot: null } }];\n}\n\n// 2) Anti-hallucination slot guard: if [[SLOTS: ...]] appears, it MUST come from a live get_slots call\nconst slotsMatch = out.match(/\\[\\[\\s*SLOTS\\s*:\\s*([^\\]]+)\\]\\]/i);\nif (slotsMatch) {\n  if (!hasBookingToolObs) {\n    // Agent fabricated slots without executing Booking tool\n    out = am\n      ? 'የክሊኒኩን የቀን መቁጠሪያ በትክክል እየፈተሽኩ ነው። እባክዎ የሚፈልጉትን ቀን ይንገሩኝ፣ ወይም በቀጥታ በ ' + PHONE + ' ይደውሉልን።'\n      : 'I am checking the live clinic calendar for you. Which day would you like to check, or you can call us directly on ' + PHONE + '.';\n    return [{ json: { output: out, pendingSlot: null } }];\n  }\n}\n\n// 3) Form is only allowed for a slot that get_slots returned in THIS turn\nconst m = out.match(/\\[\\[\\s*SLOT\\s*:\\s*([^|\\]]+?)\\s*\\|\\s*([^|\\]]*?)\\s*\\|\\s*([^\\]]*?)\\s*\\]\\]/i);\nout = out.replace(/\\[\\[\\s*SLOT[^\\]]*\\]\\]/gi, '').trim();\nlet pendingSlot = null;\nif (m && obs.includes(m[1].trim())) {\n  pendingSlot = { slot_start: m[1].trim(), category: m[2].trim() || 'checkup', reason: m[3].trim() };\n  store.pending[sid] = { ...pendingSlot, t: Date.now() };\n}\nif (/\\[\\[\\s*FORM\\s*\\]\\]/i.test(out) && !pendingSlot) {\n  out = am\n    ? 'እባክዎ የሚፈልጉትን ቀንና ሰዓት ይንገሩኝ፣ መጀመሪያ በቀን መቁጠሪያው ላይ አረጋግጣለሁ።'\n    : 'Which day and time would you like? I will check it in the calendar first.';\n}\nreturn [{ json: { output: out, pendingSlot } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2920,
+        880
+      ],
+      "id": "740975d0-4713-4343-90fe-411501e3e18a",
+      "name": "Guard & Store Slot"
     }
   ],
   "pinData": {},
@@ -597,7 +894,7 @@
       "main": [
         [
           {
-            "node": "Branch by User Language",
+            "node": "Detect Form",
             "type": "main",
             "index": 0
           }
@@ -655,7 +952,7 @@
         ]
       ]
     },
-    "Pinecone (retrieve \u2192 tool)": {
+    "Pinecone (retrieve → tool)": {
       "ai_tool": [
         [
           {
@@ -670,7 +967,7 @@
       "ai_embedding": [
         [
           {
-            "node": "Pinecone (retrieve \u2192 tool)",
+            "node": "Pinecone (retrieve → tool)",
             "type": "ai_embedding",
             "index": 0
           }
@@ -703,7 +1000,7 @@
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Guard & Store Slot",
             "type": "main",
             "index": 0
           }
@@ -733,6 +1030,86 @@
         [
           {
             "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Form": {
+      "main": [
+        [
+          {
+            "node": "Form submitted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form submitted?": {
+      "main": [
+        [
+          {
+            "node": "Ready to book?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Branch by User Language",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready to book?": {
+      "main": [
+        [
+          {
+            "node": "Book appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compose booking reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Book appointment": {
+      "main": [
+        [
+          {
+            "node": "Compose booking reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose booking reply": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guard & Store Slot": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
             "type": "main",
             "index": 0
           }

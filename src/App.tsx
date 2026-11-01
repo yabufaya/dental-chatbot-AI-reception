@@ -10,10 +10,15 @@ import {
   Sparkles,
   ChevronDown,
   Terminal,
-  RotateCcw
+  RotateCcw,
+  Maximize2,
+  Minimize2,
+  Phone,
+  Clock
 } from "lucide-react";
 import { getSessionId, resetSessionId } from "./utils/sessionId.js";
 import BookingForm from "./BookingForm";
+import ManageBookingForm from "./ManageBookingForm";
 
 interface Message {
   id: string;
@@ -22,6 +27,10 @@ interface Message {
   time: string;
   showForm?: boolean;
   formSubmitted?: boolean;
+  showManageForm?: boolean;
+  manageSubmitted?: boolean;
+  initialManageAction?: 'cancel' | 'reschedule';
+  slots?: Array<{ label: string; slot_start?: string }>;
 }
 
 interface DebugLog {
@@ -36,6 +45,14 @@ interface DebugLog {
 export default function App() {
   const [isOpen, setIsOpen] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
+  const [isCenterModal, setIsCenterModal] = useState<boolean>(false);
+
+  // Token Management: Daily conversation limit per person/device (15 messages/day)
+  const DAILY_LIMIT = 15;
+  const todayKey = `denttora_msgs_${new Date().toISOString().slice(0, 10)}`;
+  const [dailyCount, setDailyCount] = useState<number>(() => {
+    return parseInt(localStorage.getItem(todayKey) || "0", 10);
+  });
   
   // Explicit language selection state: persisted in localStorage with zero auto-detection
   const [language, setLanguage] = useState<"English" | "Amharic">(() => {
@@ -243,6 +260,29 @@ export default function App() {
       setMessages((prev) => [...prev, userMsg]);
     }
 
+    // Daily limit check to protect API token usage
+    if (dailyCount >= DAILY_LIMIT) {
+      const limitReply = language === "Amharic"
+        ? "የዛሬውን የ15 ጥያቄዎች ነፃ የውይይት ገደብ አጠናቀዋል። ለቀጠሮ እና ለቀጣይ መረጃ እባክዎ በቀጥታ ወደ ክሊኒኩ መቀበያ በ 📞 +251 911 234567 ይደውሉ።"
+        : "You have reached your daily limit of 15 free questions. To book directly or ask further questions, please call our clinic front desk at 📞 +251 911 234567.";
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "assistant",
+          text: limitReply,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        }
+      ]);
+      playAudioOrSpeak(null, limitReply);
+      return;
+    }
+
+    // Update daily count and persist
+    const newCount = dailyCount + 1;
+    setDailyCount(newCount);
+    localStorage.setItem(todayKey, String(newCount));
+
     setIsLoading(true);
 
     // Explicit user-chosen language sent directly to n8n webhook (zero auto-detection heuristics)
@@ -257,6 +297,9 @@ export default function App() {
 
     let reply = "";
     let showForm = false;
+    let showManageForm = false;
+    let manageAction: 'cancel' | 'reschedule' = 'cancel';
+    let slots: Array<{ label: string; slot_start?: string }> | undefined = undefined;
     let audio: string | null = null;
     let callSuccess = false;
 
@@ -272,6 +315,9 @@ export default function App() {
         const data = await res.json();
         reply = data.reply || data.output || data.response || "";
         showForm = Boolean(data.showForm);
+        showManageForm = Boolean(data.showManageForm);
+        manageAction = data.manageAction || 'cancel';
+        slots = data.slots || undefined;
         audio = data.audio || null;
         callSuccess = true;
         setLastLog({
@@ -283,7 +329,13 @@ export default function App() {
         });
       } else {
         const errData = await res.json().catch(() => null);
-        throw new Error(errData?.error || `HTTP ${res.status}`);
+        const serverHint = errData?.hint ? `\n\n💡 ${errData.hint}` : "";
+        reply = errData?.output || errData?.reply || (
+          language === "Amharic"
+            ? `ይቅርታ፣ ከክሊኒኩ አገልጋይ ጋር መገናኘት አልተቻለም (HTTP ${res.status})። እባክዎ በ 📞 +251 11 555 0123 ይደውሉልን።${serverHint}`
+            : `Could not connect to the n8n workflow (HTTP ${res.status}: ${errData?.error || "unreachable"}).${serverHint}`
+        );
+        callSuccess = true;
       }
     } catch (err: any) {
       setLastLog({
@@ -294,72 +346,17 @@ export default function App() {
         error: err.message,
         time: new Date().toLocaleTimeString()
       });
+      reply = language === "Amharic"
+        ? `⚠️ የኔትወርክ ግንኙነት ስህተት አጋጥሟል (${err.message})። እባክዎ n8n ስራ ላይ መሆኑን ያረጋግጡ ወይም በ 📞 +251 11 555 0123 ይደውሉ።`
+        : `⚠️ Webhook connection issue (${err.message}). If testing in n8n, verify the workflow is Active or 'Listen for test event' is active. Clinic line: 📞 +251 11 555 0123.`;
+      callSuccess = true;
     }
 
-    // Fallback simulation if backend server is unreachable during testing
-    if (!callSuccess || !reply) {
-      const q = text.toLowerCase();
-
-      if (language === "Amharic") {
-        if (q.startsWith("my details:") || q.includes("ስሜ") || q.includes("ስልክ")) {
-          reply = "በጣም እናመሰግናለን! ለነገ የቀጠሮ ሰዓትዎ ተመዝግቧል። የማረጋገጫ ቁጥርዎ DC-482913 ነው። በዴንቶራ ክሊኒክ በደስታ እንጠብቅዎታለን!";
-          showForm = false;
-        } else if (q.includes("ማጽዳት") || q.includes("ማስዳት") || q.includes("ቆሻሻ") || q.includes("ታርታር")) {
-          reply = "የጥርስ ማጽዳት (Scaling & Polishing) አገልግሎታችን በጥርሶች ላይ የተጠራቀመውን ቆሻሻ በማስወገድ ድድን ይጠብቃል። 30 ደቂቃ የሚወስድ ሲሆን ዋጋው 1,200 የኢትዮጵያ ብር ነው። ለነገ ቀጠሮ ማስያዝ ይፈልጋሉ?";
-          showForm = false;
-        } else if (q.includes("ህመም") || q.includes("ማመም") || q.includes("ነቅዞ") || q.includes("መሙላት")) {
-          reply = "የጥርስ ህመም ካለብዎት ፈጣን የህመም ማስታገሻ፣ የተፈጥሮ ቀለም ያለው ሙሌት (ከ1,500 ብር) እና የስር ህክምና እንሰጣለን። ለነገ የድንገተኛ ህክምና ሰዓት ማስያዝ ይፈልጋሉ?";
-          showForm = false;
-        } else if (q.includes("ክፍት") || q.includes("ሰዓት") || (q.includes("ነገ") && !q.match(/\b(2|3|4|5|8|9|10|11|12|1)\b/)) || q.includes("መቼ")) {
-          reply = "ለነገ ከጠዋቱ 3:00 (9:00 AM)፣ 4:00 (10:00 AM)፣ እንዲሁም ከሰዓት 8:00 (2:00 PM)፣ 9:30 (3:30 PM) የ30 ደቂቃ ክፍት ሰዓቶች አሉን። ከእነዚህ ውስጥ የትኛው ሰዓት ይመችዎታል?";
-          showForm = false;
-        } else if (q.includes("ጠዋት") || q.includes("ከሰዓት") || q.includes("የመጀመሪያ") || q.match(/\b(2|3|4|5|8|9|10|11|12|1)(?::[0-5][0-9])?\b/)) {
-          const timeMatch = q.match(/\b(2|3|4|5|8|9|10|11|12|1)(?::[0-5][0-9])?\b/);
-          const chosen = timeMatch ? `${timeMatch[0]} ሰዓት` : "ጠዋት 4:00 (10:00 AM)";
-          reply = `በጣም ጥሩ! ለነገ ${chosen} ቀጠሮዎ ተይዟል። እባክዎ ከታች ባለው ቅጽ ሙሉ ስምዎን እና ስልክ ቁጥርዎን ያስገቡ።`;
-          showForm = true;
-        } else if (q.includes("ዋጋ") || q.includes("ስንት") || q.includes("ክፍያ")) {
-          reply = "የዋጋ ዝርዝር፡\n• የጥርስ ማጽዳት፡ 1,200 ብር\n• ሙሌት፡ ከ1,500 እስከ 2,500 ብር\n• ስር ህክምና፡ ከ4,500 ብር\n• ምርመራ እና ኤክስሬይ፡ 800 ብር";
-          showForm = false;
-        } else if (q.includes("አድራሻ") || q.includes("የት") || q.includes("ቦታ")) {
-          reply = "ዴንቶራ ክሊኒክ ቦሌ መንገድ፣ አዲስ አበባ ይገኛል። ከሰኞ እስከ ቅዳሜ ከጠዋቱ 2:00 እስከ ማታ 11:00 ክፍት ነው።";
-          showForm = false;
-        } else if (q.includes("ሰላም") || q.includes("ጤና") || q.includes("እንደምን")) {
-          reply = "ጤና ይስጥልኝ! እንኳን ወደ ዴንቶራ የጥርስ ህክምና ክሊኒክ በደህና መጡ። የጥርስ ማጽዳት፣ መሙላት፣ ወይም ቀጠሮ ማስያዝ ይፈልጋሉ? በምን ልርዳዎት?";
-          showForm = false;
-        } else {
-          reply = "እንኳን ወደ ዴንቶራ የጥርስ ህክምና ክሊኒክ በደህና መጡ! ከሰኞ እስከ ቅዳሜ ከጠዋቱ 2:00 እስከ 11:00 ክፍት ነን። በምን ልርዳዎት?";
-          showForm = false;
-        }
-      } else {
-        if (q.startsWith("my details:")) {
-          reply = "Thank you! I have confirmed your appointment for tomorrow. Your booking reference is DC-482913. We look forward to seeing you at Denttora Dental Clinic!";
-          showForm = false;
-        } else if (q.includes("clean") || q.includes("scaling")) {
-          reply = "We would be delighted to take care of your teeth cleaning! Our professional scaling and polishing removes plaque and tartar, protects your gums, and freshens your breath. It takes about 30 minutes and is 1,200 ETB. When would you like to come in? Let me know which day or time works best for you.";
-          showForm = false;
-        } else if (q.includes("slot") || q.includes("available") || q.includes("free time") || q.includes("what time") || q.includes("when can") || (q.includes("tomorrow") && !q.match(/\b(8|9|10|11|12|1|2|3|4|5)(?::\d{2})?\s*(?:am|pm)\b/))) {
-          reply = "Tomorrow, Tuesday, we have 30-minute checkup slots available throughout the day. In the morning, you can choose from times like 8:30 AM (2:30 local), 9:30 AM (3:30 local), or 10:30 AM (4:30 local). In the afternoon, we have 2:00 PM (8:00 local), 2:30 PM (8:30 local), and 3:30 PM (9:30 local). Which of these 30-minute times works best for you?";
-          showForm = false;
-        } else if (q.match(/\b(8|9|10|11|12|1|2|3|4|5)(?::\d{2})?\s*(?:am|pm)?\b/) || q.includes("first") || q.includes("morning") || q.includes("afternoon")) {
-          const timeMatch = q.match(/\b(8|9|10|11|12|1|2|3|4|5)(?::[0-5][0-9])?\s*(?:am|pm)?\b/i);
-          const selected = timeMatch ? timeMatch[0].toUpperCase() : "10:00 AM";
-          reply = `Perfect, ${selected} tomorrow is reserved for you! Please confirm your full name and phone number in the form below so we can finalize your booking.`;
-          showForm = true;
-        } else if (q.includes("tomorrow") || q.includes("book")) {
-          reply = "We are open Monday to Saturday from 8:00 AM to 5:00 PM in Addis Ababa. We have slots available tomorrow morning and afternoon. Which time of day do you prefer?";
-          showForm = false;
-        } else if (q.includes("headache") || q.includes("fever") || q.includes("cold") || q.includes("stomach")) {
-          reply = "I would love to help, but I am strictly the dental assistant here! My knowledge only covers teeth, oral care, and clinic bookings. For other health questions, please consult a general doctor. Is there anything about your teeth I can assist you with?";
-          showForm = false;
-        } else if (q.includes("price") || q.includes("cost")) {
-          reply = "Our main treatment prices:\n• Cleaning (Scaling & Polishing): 1,200 ETB\n• Fillings: 1,500 – 2,500 ETB\n• Checkup & X-ray: 800 ETB\n• Root Canal: from 4,500 ETB\n• Whitening: 5,500 ETB";
-          showForm = false;
-        } else {
-          reply = "Hello! I am the virtual assistant for Denttora Dental Clinic in Addis Ababa. We are open Monday to Saturday from 8:00 AM to 5:00 PM. How can I help you today?";
-          showForm = false;
-        }
-      }
+    // Real error messaging on network hiccup or timeout - ZERO mock simulation
+    if (!reply) {
+      reply = language === "Amharic"
+        ? "ይቅርታ፣ የኔትወርክ መቆራረጥ አጋጥሟል ወይም የአገልጋዩ ምላሽ ጊዜ ወስዶበታል (Connection hiccup / Timeout)። እባክዎ ጥቂት ቆይተው እንደገና ይሞክሩ ወይም በቀጥታ ወደ ክሊኒኩ መቀበያ በ 📞 +251 11 555 0123 ይደውሉ።"
+        : "Sorry, there was a network hiccup or connection timeout waiting for the clinic assistant to respond. Please try again or call our front desk directly at 📞 +251 11 555 0123.";
     }
 
     setIsLoading(false);
@@ -370,7 +367,11 @@ export default function App() {
       text: reply,
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       showForm: showForm,
-      formSubmitted: false
+      formSubmitted: false,
+      showManageForm: showManageForm,
+      manageSubmitted: false,
+      initialManageAction: manageAction,
+      slots: slots
     };
 
     setMessages((prev) => [...prev, botMsg]);
@@ -415,6 +416,38 @@ export default function App() {
                 <Terminal className="w-4 h-4" /> Live Backend Proxy Inspector
               </span>
               <span className="text-[11px] text-slate-400">Endpoint: POST /api/chat</span>
+            </div>
+
+            {/* Workflow Sync Helper for n8n */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-slate-900 rounded border border-slate-800 text-[11px]">
+              <span className="text-slate-300">
+                📦 <strong>n8n Amharic + English Workflow:</strong> Ready to import into your n8n canvas.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("/workflows/Dental-Clinic-RAG-CHAT-Fixed.json");
+                      const text = await res.text();
+                      await navigator.clipboard.writeText(text);
+                      alert("Workflow JSON copied to clipboard! In n8n, press Ctrl+V / Cmd+V on the canvas.");
+                    } catch (e) {
+                      window.open("/workflows/Dental-Clinic-RAG-CHAT-Fixed.json", "_blank");
+                    }
+                  }}
+                  className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded font-medium transition cursor-pointer"
+                >
+                  📋 Copy JSON for n8n
+                </button>
+                <a
+                  href="/workflows/Dental-Clinic-RAG-CHAT-Fixed.json"
+                  download="Dental-Clinic-RAG-CHAT-Fixed.json"
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-medium transition border border-slate-700"
+                >
+                  ⬇️ Download JSON
+                </a>
+              </div>
             </div>
 
             {/* Last Execution Inspector */}
@@ -465,13 +498,26 @@ export default function App() {
           Welcome to Denttora. Click the floating chat icon in the bottom corner to ask questions about teeth cleaning, check prices, or book an appointment.
         </p>
 
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className="inline-flex items-center gap-2.5 px-6 py-3 rounded-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium shadow-md shadow-teal-600/20 transition hover:scale-105 active:scale-95 cursor-pointer"
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>{isOpen ? "Close Assistant" : "Chat with Front Desk"}</span>
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={() => {
+              setIsCenterModal(false);
+              setIsOpen(true);
+            }}
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-full bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold shadow-md shadow-teal-600/20 transition hover:scale-105 active:scale-95 cursor-pointer"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>Chat with Assistant</span>
+          </button>
+
+          <a
+            href="tel:+251911234567"
+            className="inline-flex items-center gap-2 px-4 py-3 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition cursor-pointer"
+          >
+            <Phone className="w-3.5 h-3.5 text-teal-600" />
+            <span>Direct Call (+251 911 234567)</span>
+          </a>
+        </div>
       </main>
 
       {/* FOOTER */}
@@ -479,11 +525,14 @@ export default function App() {
         Denttora Dental Clinic • Bole Sub-city, Addis Ababa • Powered by n8n AI & Voice
       </footer>
 
-      {/* FLOATING BOT LAUNCHER BUTTON */}
+      {/* FLOATING BOT LAUNCHER BUTTON (Bottom-Right) */}
       <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
         {!isOpen && (
           <button
-            onClick={() => setIsOpen(true)}
+            onClick={() => {
+              setIsCenterModal(false);
+              setIsOpen(true);
+            }}
             className="hidden sm:flex items-center gap-2 bg-white text-slate-700 text-xs font-medium px-3.5 py-2 rounded-full shadow-lg border border-slate-200/80 hover:bg-slate-50 transition hover:scale-105 cursor-pointer"
           >
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -505,130 +554,168 @@ export default function App() {
         </button>
       </div>
 
-      {/* CHAT WINDOW */}
+      {/* CHAT WINDOW: STRICTLY POSITIONED ON SAME SIDE AS LAUNCHER ICON WITH GUARANTEED BODY MARGINS & CRISP BORDER */}
       {isOpen && (
-        <div className="fixed bottom-24 right-6 w-[90vw] sm:w-[420px] h-[580px] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-5 duration-200 relative">
-          
-          {/* FIRST-RUN LANGUAGE SELECTION MODAL PROMPT */}
-          {showLanguageModal && (
-            <div className="absolute inset-0 z-40 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-              <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 max-w-xs w-full text-center space-y-4">
-                <div className="w-12 h-12 mx-auto rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center text-2xl shadow-inner border border-teal-100">
-                  🦷
-                </div>
-                
-                <div className="space-y-1">
-                  <h4 className="text-sm font-bold text-slate-900">Choose Your Language</h4>
-                  <p className="text-xs font-semibold text-teal-700">እባክዎ የሚመርጡትን ቋንቋ ይምረጡ</p>
-                  <p className="text-[11px] text-slate-500 leading-relaxed pt-1">
-                    Select your preferred language. The chatbot and voice engine will strictly follow your selection.
-                  </p>
-                </div>
-
-                <div className="space-y-2 pt-1">
-                  <button
-                    onClick={() => selectLanguage("Amharic")}
-                    className="w-full flex items-center justify-between p-3 rounded-xl border-2 border-teal-500 bg-teal-50/70 hover:bg-teal-100/80 text-left transition group cursor-pointer shadow-xs"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">🇪🇹</span>
-                      <div>
-                        <p className="text-xs font-bold text-teal-950">አማርኛ (Amharic)</p>
-                        <p className="text-[10px] text-teal-700">ውይይቱን በአማርኛ ቋንቋ ይቀጥሉ</p>
-                      </div>
-                    </div>
-                    <span className="text-xs font-bold text-teal-700">ይምረጡ ➔</span>
-                  </button>
-
-                  <button
-                    onClick={() => selectLanguage("English")}
-                    className="w-full flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-teal-500 bg-white hover:bg-teal-50/40 text-left transition group cursor-pointer shadow-xs"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">🇺🇸</span>
-                      <div>
-                        <p className="text-xs font-bold text-slate-900 group-hover:text-teal-900">English</p>
-                        <p className="text-[10px] text-slate-500">Continue consultation in English</p>
-                      </div>
-                    </div>
-                    <span className="text-xs font-bold text-slate-400 group-hover:text-teal-600">Select ➔</span>
-                  </button>
-                </div>
-
-                <p className="text-[10px] text-slate-400 border-t border-slate-100 pt-2.5">
-                  You can alter this anytime using the toggle in the header.
-                </p>
-              </div>
-            </div>
+        <>
+          {/* Backdrop only when manually centered */}
+          {isCenterModal && (
+            <div
+              onClick={() => setIsCenterModal(false)}
+              className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+            />
           )}
 
-          {/* Header */}
-          <div className="bg-teal-600 px-3.5 py-3 text-white flex items-center justify-between shadow-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm font-bold">
-                🦷
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold leading-tight">Denttora Assistant</h3>
-                <p className="text-[10px] text-teal-100 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
-                  Online • Addis Ababa
-                </p>
-              </div>
-            </div>
+          <div
+            className={
+              isCenterModal
+                ? "fixed inset-4 sm:inset-8 md:inset-12 lg:inset-16 max-w-2xl w-full h-[88vh] max-h-[720px] mx-auto my-auto z-50 bg-white rounded-3xl shadow-2xl border-2 border-slate-300 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+                : "fixed bottom-[88px] sm:bottom-[92px] right-4 sm:right-6 w-[calc(100vw-2rem)] sm:w-[410px] max-w-[420px] h-[min(580px,calc(100dvh-7.5rem))] max-h-[calc(100dvh-7.5rem)] z-50 bg-white rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.28)] border-2 border-slate-300 ring-1 ring-slate-900/10 flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-200"
+            }
+          >
+            {/* FIRST-RUN LANGUAGE SELECTION MODAL PROMPT */}
+            {showLanguageModal && (
+              <div className="absolute inset-0 z-40 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+                <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 p-5 max-w-xs w-full text-center space-y-4">
+                  <div className="w-12 h-12 mx-auto rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center text-2xl shadow-inner border border-teal-100">
+                    🦷
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-bold text-slate-900">Choose Your Language</h4>
+                    <p className="text-xs font-semibold text-teal-700">እባክዎ የሚመርጡትን ቋንቋ ይምረጡ</p>
+                    <p className="text-[11px] text-slate-500 leading-relaxed pt-1">
+                      Select your preferred language. The chatbot and voice engine will strictly follow your selection.
+                    </p>
+                  </div>
 
-            {/* Persistent Language Switcher & Controls */}
-            <div className="flex items-center gap-1.5">
-              {/* Segmented language switcher: User can alter at ANY time */}
-              <div className="flex items-center bg-teal-800/90 rounded-lg p-0.5 border border-teal-500/30 text-[11px] font-medium shadow-inner">
-                <button
-                  onClick={() => selectLanguage("Amharic")}
-                  className={`px-2 py-0.5 rounded text-[11px] transition cursor-pointer ${
-                    language === "Amharic"
-                      ? "bg-white text-teal-950 font-bold shadow-xs"
-                      : "text-teal-100 hover:text-white"
-                  }`}
-                  title="Switch to Amharic (አማርኛ)"
+                  <div className="space-y-2 pt-1">
+                    <button
+                      onClick={() => selectLanguage("Amharic")}
+                      className="w-full flex items-center justify-between p-3 rounded-xl border-2 border-teal-500 bg-teal-50/70 hover:bg-teal-100/80 text-left transition group cursor-pointer shadow-xs"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">🇪🇹</span>
+                        <div>
+                          <p className="text-xs font-bold text-teal-950">አማርኛ (Amharic)</p>
+                          <p className="text-[10px] text-teal-700">ውይይቱን በአማርኛ ቋንቋ ይቀጥሉ</p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold text-teal-700">ይምረጡ ➔</span>
+                    </button>
+
+                    <button
+                      onClick={() => selectLanguage("English")}
+                      className="w-full flex items-center justify-between p-3 rounded-xl border border-slate-200 hover:border-teal-500 bg-white hover:bg-teal-50/40 text-left transition group cursor-pointer shadow-xs"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">🇺🇸</span>
+                        <div>
+                          <p className="text-xs font-bold text-slate-900 group-hover:text-teal-900">English</p>
+                          <p className="text-[10px] text-slate-500">Continue consultation in English</p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold text-slate-400 group-hover:text-teal-600">Select ➔</span>
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 border-t border-slate-100 pt-2.5">
+                    You can alter this anytime using the toggle in the header.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Header */}
+            <div className="bg-teal-600 px-3.5 py-3 text-white flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-sm font-bold">
+                  🦷
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold leading-tight">Denttora Assistant</h3>
+                  <p className="text-[10px] text-teal-100 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
+                    Online • Addis Ababa
+                  </p>
+                </div>
+              </div>
+
+              {/* Persistent Language Switcher & Controls */}
+              <div className="flex items-center gap-1.5">
+                {/* Segmented language switcher: User can alter at ANY time */}
+                <div className="flex items-center bg-teal-800/90 rounded-lg p-0.5 border border-teal-500/30 text-[11px] font-medium shadow-inner">
+                  <button
+                    onClick={() => selectLanguage("Amharic")}
+                    className={`px-2 py-0.5 rounded text-[11px] transition cursor-pointer ${
+                      language === "Amharic"
+                        ? "bg-white text-teal-950 font-bold shadow-xs"
+                        : "text-teal-100 hover:text-white"
+                    }`}
+                    title="Switch to Amharic (አማርኛ)"
+                  >
+                    🇪🇹 አማ
+                  </button>
+                  <button
+                    onClick={() => selectLanguage("English")}
+                    className={`px-2 py-0.5 rounded text-[11px] transition cursor-pointer ${
+                      language === "English"
+                        ? "bg-white text-teal-950 font-bold shadow-xs"
+                        : "text-teal-100 hover:text-white"
+                    }`}
+                    title="Switch to English"
+                  >
+                    🇺🇸 EN
+                  </button>
+                </div>
+
+                <a
+                  href="tel:+251911234567"
+                  className="p-1.5 text-white/90 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer flex items-center gap-1"
+                  title="Call Clinic Reception Directly (+251 911 234567)"
                 >
-                  🇪🇹 አማ
+                  <Phone className="w-3.5 h-3.5 text-teal-200" />
+                </a>
+
+                <button
+                  onClick={handleNewChat}
+                  className="p-1.5 text-white/80 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer"
+                  title="New chat"
+                  aria-label="New chat"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => selectLanguage("English")}
-                  className={`px-2 py-0.5 rounded text-[11px] transition cursor-pointer ${
-                    language === "English"
-                      ? "bg-white text-teal-950 font-bold shadow-xs"
-                      : "text-teal-100 hover:text-white"
-                  }`}
-                  title="Switch to English"
+                  onClick={() => setVoiceEnabled(!voiceEnabled)}
+                  className="p-1.5 text-white/80 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer"
+                  title={voiceEnabled ? "Mute Voice" : "Enable Voice"}
                 >
-                  🇺🇸 EN
+                  {voiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                </button>
+
+                {/* Center Modal / Floating Widget Toggle */}
+                <button
+                  onClick={() => {
+                    setIsCenterModal((prev) => {
+                      const next = !prev;
+                      localStorage.setItem("denttora_center_modal", String(next));
+                      return next;
+                    });
+                  }}
+                  className="p-1.5 text-white/80 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer"
+                  title={isCenterModal ? "Collapse to Floating Widget" : "Expand to Centered Console with Margins"}
+                >
+                  {isCenterModal ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                </button>
+
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="p-1.5 text-white/80 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer"
+                  title="Minimize Chat"
+                >
+                  <ChevronDown className="w-4 h-4" />
                 </button>
               </div>
-
-              <button
-                onClick={handleNewChat}
-                className="p-1.5 text-white/80 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer"
-                title="New chat"
-                aria-label="New chat"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setVoiceEnabled(!voiceEnabled)}
-                className="p-1.5 text-white/80 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer"
-                title={voiceEnabled ? "Mute Voice" : "Enable Voice"}
-              >
-                {voiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-              </button>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="p-1.5 text-white/80 hover:text-white rounded-lg transition hover:bg-teal-700 cursor-pointer"
-                title="Minimize Chat"
-              >
-                <ChevronDown className="w-4 h-4" />
-              </button>
             </div>
-          </div>
 
           {/* Quick Suggestion Chips */}
           <div className="bg-slate-50 px-3 py-2 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto text-[11px]">
@@ -645,6 +732,12 @@ export default function App() {
                   className="bg-white hover:bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200 whitespace-nowrap transition cursor-pointer"
                 >
                   ነገ ቀጠሮ
+                </button>
+                <button
+                  onClick={() => sendMessage("ቀጠሮዬን መሰረዝ ወይም ቀን መቀየር እፈልጋለሁ")}
+                  className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full border border-amber-200 whitespace-nowrap transition cursor-pointer"
+                >
+                  ቀጠሮ መሰረዝ/መቀየር
                 </button>
                 <button
                   onClick={() => sendMessage("የጥርስ ህክምና ዋጋ ዝርዝር ስንት ነው?")}
@@ -674,6 +767,12 @@ export default function App() {
                   Book visit
                 </button>
                 <button
+                  onClick={() => sendMessage("I want to cancel or reschedule my appointment")}
+                  className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full border border-amber-200 whitespace-nowrap transition cursor-pointer"
+                >
+                  Cancel / Reschedule
+                </button>
+                <button
                   onClick={() => sendMessage("How much are cleanings and fillings?")}
                   className="bg-white hover:bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full border border-slate-200 whitespace-nowrap transition cursor-pointer"
                 >
@@ -689,21 +788,63 @@ export default function App() {
             )}
           </div>
 
+          {/* Token Management: Daily Quota & In-Clinic Payment Notice */}
+          <div className="bg-slate-100/95 px-3.5 py-1.5 border-b border-slate-200/80 flex items-center justify-between text-[10px] text-slate-600 select-none">
+            <span className="flex items-center gap-1 font-medium">
+              <span className={`w-1.5 h-1.5 rounded-full ${dailyCount >= DAILY_LIMIT ? "bg-amber-500" : "bg-emerald-500"}`}></span>
+              {language === "Amharic"
+                ? `የዛሬ የቀሩ ጥያቄዎች፡ ${Math.max(0, DAILY_LIMIT - dailyCount)}/${DAILY_LIMIT}`
+                : `Daily quota: ${Math.max(0, DAILY_LIMIT - dailyCount)}/${DAILY_LIMIT} remaining`}
+            </span>
+            <span className="text-slate-400 font-normal">
+              {language === "Amharic" ? "ክፍያ በአካል ክሊኒኩ ሲደርሱ" : "Pay at clinic upon arrival"}
+            </span>
+          </div>
+
           {/* Messages Container */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 bg-slate-50/60">
             {messages.map((m) => (
               <div
                 key={m.id}
-                className={`flex ${m.sender === "patient" ? "justify-end" : "justify-start"}`}
+                className={`flex items-start gap-2.5 ${m.sender === "patient" ? "justify-end" : "justify-start"}`}
               >
+                {m.sender === "assistant" && (
+                  <div className="w-7 h-7 rounded-xl bg-teal-600 text-white flex items-center justify-center text-xs font-bold shadow-xs shrink-0 mt-0.5">
+                    🦷
+                  </div>
+                )}
+
                 <div
-                  className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-line ${
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed whitespace-pre-line shadow-xs ${
                     m.sender === "patient"
-                      ? "bg-teal-600 text-white rounded-br-none shadow-sm"
-                      : "bg-white text-slate-800 border border-slate-200/80 rounded-bl-none shadow-sm"
+                      ? "bg-teal-600 text-white rounded-tr-xs"
+                      : "bg-white text-slate-800 border border-slate-200/90 rounded-tl-xs"
                   }`}
                 >
                   {m.text}
+
+                  {/* Render Interactive Slot Buttons (Tap-to-Select) */}
+                  {m.sender === "assistant" && m.slots && m.slots.length > 0 && (
+                    <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-2">
+                      <p className="text-[10px] font-semibold text-teal-800 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                        <span>{language === "Amharic" ? "የሚመችዎትን ሰዓት ይጫኑ፡" : "Tap your preferred time:"}</span>
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {m.slots.map((s, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => sendMessage(s.label)}
+                            disabled={isLoading}
+                            className="px-2.5 py-1.5 bg-teal-50 hover:bg-teal-600 text-teal-900 hover:text-white rounded-lg border border-teal-200/90 text-[11px] font-medium transition cursor-pointer flex items-center justify-center gap-1 shadow-2xs hover:shadow-sm"
+                            title={`Select slot ${s.label}`}
+                          >
+                            <span>{s.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Render BookingForm inside bot bubble with selected language */}
                   {m.sender === "assistant" && m.showForm && (
@@ -725,20 +866,50 @@ export default function App() {
                     />
                   )}
 
+                  {/* Render Cancel / Postpone Form inside bot bubble */}
+                  {m.sender === "assistant" && m.showManageForm && (
+                    <ManageBookingForm
+                      alreadySubmitted={m.manageSubmitted}
+                      isLoading={isLoading}
+                      language={language}
+                      initialAction={m.initialManageAction || 'cancel'}
+                      onSubmit={(formattedDetails) => {
+                        setMessages((prev) =>
+                          prev.map((msg) =>
+                            msg.id === m.id ? { ...msg, manageSubmitted: true } : msg
+                          )
+                        );
+                        sendMessage(formattedDetails, {
+                          hidden: false,
+                          originatingMessageId: m.id
+                        });
+                      }}
+                    />
+                  )}
+
                   <div
-                    className={`text-[9px] mt-1 text-right ${
+                    className={`text-[9px] mt-1.5 text-right ${
                       m.sender === "patient" ? "text-teal-100" : "text-slate-400"
                     }`}
                   >
                     {m.time}
                   </div>
                 </div>
+
+                {m.sender === "patient" && (
+                  <div className="w-7 h-7 rounded-xl bg-slate-800 text-white flex items-center justify-center text-xs font-bold shadow-xs shrink-0 mt-0.5">
+                    👤
+                  </div>
+                )}
               </div>
             ))}
 
             {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-none px-4 py-2.5 text-xs text-slate-400 flex items-center gap-1.5 shadow-sm">
+              <div className="flex items-start gap-2.5 justify-start">
+                <div className="w-7 h-7 rounded-xl bg-teal-600 text-white flex items-center justify-center text-xs font-bold shadow-xs shrink-0 mt-0.5">
+                  🦷
+                </div>
+                <div className="bg-white border border-slate-200/90 rounded-2xl rounded-tl-xs px-4 py-3 text-xs text-slate-400 flex items-center gap-1.5 shadow-xs">
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce"></span>
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce [animation-delay:0.2s]"></span>
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-bounce [animation-delay:0.4s]"></span>
@@ -748,38 +919,74 @@ export default function App() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Bar - Always active even while form is open */}
-          <div className="p-3 bg-white border-t border-slate-100 flex items-center gap-2">
-            <button
-              onClick={handleMicClick}
-              className={`p-2.5 rounded-full transition cursor-pointer ${
-                isRecording
-                  ? "bg-red-500 text-white animate-pulse"
-                  : "bg-slate-100 hover:bg-slate-200 text-slate-700"
-              }`}
-              title={isRecording ? "Stop Listening" : "Speak to Assistant"}
-            >
-              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            </button>
+          {/* Input Bar with Token Safeguard (400 char limit & daily quota disable) */}
+          <div className="p-3 bg-white border-t border-slate-100 flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleMicClick}
+                disabled={dailyCount >= DAILY_LIMIT}
+                className={`p-2.5 rounded-full transition cursor-pointer disabled:opacity-40 ${
+                  isRecording
+                    ? "bg-red-500 text-white animate-pulse"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                }`}
+                title={isRecording ? "Stop Listening" : "Speak to Assistant"}
+              >
+                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
 
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              placeholder={isRecording ? (language === "Amharic" ? "እያዳመጥኩ ነው..." : "Listening...") : (language === "Amharic" ? "ጥያቄዎን እዚህ ይጻፉ..." : "Type your message...")}
-              className="flex-1 bg-slate-50 border border-slate-200 rounded-full px-4 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-500 transition"
-            />
+              <div className="relative flex-1 flex items-center">
+                <input
+                  type="text"
+                  maxLength={400}
+                  value={input}
+                  disabled={dailyCount >= DAILY_LIMIT}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                  placeholder={
+                    dailyCount >= DAILY_LIMIT
+                      ? (language === "Amharic" ? "የዛሬውን ገደብ ጨርሰዋል • በ 0911234567 ይደውሉ" : "Daily quota reached • Please call +251 911 234567")
+                      : isRecording
+                      ? (language === "Amharic" ? "እያዳመጥኩ ነው..." : "Listening...")
+                      : (language === "Amharic" ? "ጥያቄዎን እዚህ ይጻፉ..." : "Type your message...")
+                  }
+                  className="w-full bg-slate-50 border border-slate-200 rounded-full pl-4 pr-12 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-teal-500 disabled:opacity-60 transition"
+                />
+                {input.length > 250 && (
+                  <span className="absolute right-3 text-[10px] text-slate-400 font-mono">
+                    {input.length}/400
+                  </span>
+                )}
+              </div>
 
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim() || isLoading}
-              className="p-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white rounded-full transition cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || isLoading || dailyCount >= DAILY_LIMIT}
+                className="p-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-40 text-white rounded-full transition cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+
+            {dailyCount >= DAILY_LIMIT && (
+              <div className="flex items-center justify-between text-[11px] text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+                <span>
+                  {language === "Amharic"
+                    ? "የዛሬውን ነፃ የውይይት ገደብ አጠናቀዋል።"
+                    : "You reached the daily question limit."}
+                </span>
+                <a
+                  href="tel:+251911234567"
+                  className="font-bold underline text-teal-800 flex items-center gap-1"
+                >
+                  <Phone className="w-3 h-3" />
+                  0911234567
+                </a>
+              </div>
+            )}
           </div>
         </div>
+        </>
       )}
     </div>
   );
